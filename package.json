@@ -1,6 +1,6 @@
 {
   "name": "@earny/puppeteer-latest",
-  "version": "1.2.0",
+  "version": "1.2.0-ey1",
   "description": "A high-level API to control headless Chrome over the DevTools Protocol",
   "main": "index.js",
   "repository": "github:GoogleChrome/puppeteer",
