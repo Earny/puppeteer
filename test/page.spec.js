@@ -40,6 +40,20 @@ module.exports.addTests = function({testRunner, expect, puppeteer, DeviceDescrip
       await newPage.close();
       expect(await browser.pages()).not.toContain(newPage);
     });
+    it('should run beforeunload if asked for', async({browser, server}) => {
+      const newPage = await browser.newPage();
+      await newPage.goto(server.PREFIX + '/beforeunload.html');
+      // We have to interact with a page so that 'beforeunload' handlers
+      // fire.
+      await newPage.click('body');
+      newPage.close({ runBeforeUnload: true });
+      const dialog = await waitEvent(newPage, 'dialog');
+      expect(dialog.type()).toBe('beforeunload');
+      expect(dialog.defaultValue()).toBe('');
+      expect(dialog.message()).toBe('');
+      dialog.accept();
+      await waitEvent(newPage, 'close');
+    });
   });
 
   describe('Page.Events.error', function() {
@@ -181,6 +195,18 @@ module.exports.addTests = function({testRunner, expect, puppeteer, DeviceDescrip
       const aHandle = await page.evaluateHandle(() => 5);
       const isFive = await page.evaluate(e => Object.is(e, 5), aHandle);
       expect(isFive).toBeTruthy();
+    });
+    it('should simulate a user gesture', async({page, server}) => {
+      await page.evaluate(playAudio);
+      // also test evaluating strings
+      await page.evaluate(`(${playAudio})()`);
+
+      function playAudio() {
+        const audio = document.createElement('audio');
+        audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+        // This returns a promise which throws if it was not triggered by a user gesture.
+        return audio.play();
+      }
     });
   });
 
@@ -331,6 +357,15 @@ module.exports.addTests = function({testRunner, expect, puppeteer, DeviceDescrip
       ]);
       expect(message.text()).toBe('JSHandle@object');
     });
+    it('should trigger correct Log', async({page, server}) => {
+      await page.goto('about:blank');
+      let message;
+      page.on('console', event => message = event);
+      page.evaluate(async url => fetch(url).catch(e => {}), server.EMPTY_PAGE);
+      await waitEvent(page, 'console');
+      expect(message.text()).toContain('No \'Access-Control-Allow-Origin\'');
+      expect(message.type()).toEqual('error');
+    });
   });
 
   describe('Page.Events.DOMContentLoaded', function() {
@@ -382,6 +417,10 @@ module.exports.addTests = function({testRunner, expect, puppeteer, DeviceDescrip
     it('should navigate to about:blank', async({page, server}) => {
       const response = await page.goto('about:blank');
       expect(response).toBe(null);
+    });
+    it('should return response when page changes its URL after load', async({page, server}) => {
+      const response = await page.goto(server.PREFIX + '/historyapi.html');
+      expect(response.status()).toBe(200);
     });
     it('should work with subframes return 204', async({page, server}) => {
       server.setRoute('/frames/frame.html', (req, res) => {
@@ -1570,6 +1609,33 @@ module.exports.addTests = function({testRunner, expect, puppeteer, DeviceDescrip
       const closedPromise = new Promise(x => newPage.on('close', x));
       await newPage.close();
       await closedPromise;
+    });
+  });
+  describe('Workers', function() {
+    it('Page.workers', async function({page, server}) {
+      await page.goto(server.PREFIX + '/worker/worker.html');
+      await page.waitForFunction(() => !!worker);
+      const worker = page.workers()[0];
+      expect(worker.url()).toContain('worker.js');
+      const executionContext = await worker.executionContext();
+      expect(await executionContext.evaluate(() => self.workerFunction())).toBe('worker function result');
+
+      await page.goto(server.EMPTY_PAGE);
+      expect(page.workers()).toEqual([]);
+    });
+    it('should emit created and destroyed events', async function({page}) {
+      const workerCreatedPromise = new Promise(x => page.once('workercreated', x));
+      const workerObj = await page.evaluateHandle(() => new Worker('data:text/javascript,1'));
+      const worker = await workerCreatedPromise;
+      const workerDestroyedPromise = new Promise(x => page.once('workerdestroyed', x));
+      await page.evaluate(workerObj => workerObj.terminate(), workerObj);
+      expect(await workerDestroyedPromise).toBe(worker);
+    });
+    it('should report console logs', async function({page}) {
+      const logPromise = new Promise(x => page.on('console', x));
+      await page.evaluate(() => new Worker(`data:text/javascript,console.log(1)`));
+      const log = await logPromise;
+      expect(log.text()).toBe('1');
     });
   });
 
