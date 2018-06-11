@@ -54,6 +54,12 @@ module.exports.addTests = function({testRunner, expect, puppeteer, DeviceDescrip
       dialog.accept();
       await waitEvent(newPage, 'close');
     });
+    it('should set the page close state', async({ browser }) => {
+      const newPage = await browser.newPage();
+      expect(newPage.isClosed()).toBe(false);
+      await newPage.close();
+      expect(newPage.isClosed()).toBe(true);
+    });
   });
 
   describe('Page.Events.error', function() {
@@ -1504,6 +1510,14 @@ module.exports.addTests = function({testRunner, expect, puppeteer, DeviceDescrip
       });
       expect(screenshot).toBeGolden('screenshot-clip-odd-size.png');
     });
+    it('should return base64', async({page, server}) => {
+      await page.setViewport({width: 500, height: 500});
+      await page.goto(server.PREFIX + '/grid.html');
+      const screenshot = await page.screenshot({
+        encoding: 'base64'
+      });
+      expect(Buffer.from(screenshot, 'base64')).toBeGolden('screenshot-sanity.png');
+    });
   });
 
   describe('Page.select', function() {
@@ -1609,33 +1623,6 @@ module.exports.addTests = function({testRunner, expect, puppeteer, DeviceDescrip
       const closedPromise = new Promise(x => newPage.on('close', x));
       await newPage.close();
       await closedPromise;
-    });
-  });
-  describe('Workers', function() {
-    it('Page.workers', async function({page, server}) {
-      await page.goto(server.PREFIX + '/worker/worker.html');
-      await page.waitForFunction(() => !!worker);
-      const worker = page.workers()[0];
-      expect(worker.url()).toContain('worker.js');
-      const executionContext = await worker.executionContext();
-      expect(await executionContext.evaluate(() => self.workerFunction())).toBe('worker function result');
-
-      await page.goto(server.EMPTY_PAGE);
-      expect(page.workers()).toEqual([]);
-    });
-    it('should emit created and destroyed events', async function({page}) {
-      const workerCreatedPromise = new Promise(x => page.once('workercreated', x));
-      const workerObj = await page.evaluateHandle(() => new Worker('data:text/javascript,1'));
-      const worker = await workerCreatedPromise;
-      const workerDestroyedPromise = new Promise(x => page.once('workerdestroyed', x));
-      await page.evaluate(workerObj => workerObj.terminate(), workerObj);
-      expect(await workerDestroyedPromise).toBe(worker);
-    });
-    it('should report console logs', async function({page}) {
-      const logPromise = new Promise(x => page.on('console', x));
-      await page.evaluate(() => new Worker(`data:text/javascript,console.log(1)`));
-      const log = await logPromise;
-      expect(log.text()).toBe('1');
     });
   });
 
